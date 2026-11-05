@@ -1,0 +1,29 @@
+# Cópia de ../Benchmark/configs/benchmark.yaml (contrato do pm25bench v0.1).
+# data, n_context, leads, thresholds, block_days, n_boot e seed são IDÊNTICOS ao oficial,
+# para que o dataset_hash e as amostras de teste sejam os mesmos. Só mudam os modelos e a
+# pasta de saída (output_dir não entra no hash).
+data:
+  source: download
+  station: 73          # Congonhas (São Paulo)
+  min_hours: 18        # horas válidas mínimas para a média diária
+  train_end: 2019-12-31
+  val_end: 2021-12-31  # teste: 2022-2024
+  gap_days: 7
+
+models:
+  - name: persistence
+  - name: climatology
+  - name: reanalysis_raw
+  - name: linear_regression
+  - name: dom
+  - name: gbm
+  - name: gbm          # aparece como gbm_estendidas nos resultados
+    kwargs: {variaveis: estendidas}
+
+n_context: 7           # dias de contexto (t-6 ... t)
+leads: [0, 1, 2, 3]    # 0 = o próprio dia t
+thresholds: [15, 25, 50]
+block_days: 7
+n_boot: 1000
+seed: 42
+output_dir: results_calibracao

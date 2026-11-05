@@ -1,0 +1,72 @@
+{
+  "pm25bench_version": "0.1.0",
+  "dataset_hash": "sha256:53303ce1ac8a540e1257bf0618dfad39ce28950fa7f1eadb15318f30ae085c48",
+  "station": 73,
+  "n_test_samples": 732,
+  "test_period": [
+    "2022-01-08",
+    "2024-12-31"
+  ],
+  "config": {
+    "data": {
+      "source": "download",
+      "sisam_dir": null,
+      "cetesb_dir": null,
+      "station": 73,
+      "min_hours": 18,
+      "train_end": "2019-12-31",
+      "val_end": "2021-12-31",
+      "gap_days": 7
+    },
+    "models": [
+      {
+        "name": "persistence",
+        "kwargs": {}
+      },
+      {
+        "name": "climatology",
+        "kwargs": {}
+      },
+      {
+        "name": "reanalysis_raw",
+        "kwargs": {}
+      },
+      {
+        "name": "linear_regression",
+        "kwargs": {}
+      },
+      {
+        "name": "dom",
+        "kwargs": {}
+      },
+      {
+        "name": "gbm",
+        "kwargs": {}
+      },
+      {
+        "name": "gbm",
+        "kwargs": {
+          "variaveis": "estendidas"
+        }
+      }
+    ],
+    "n_context": 7,
+    "leads": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "thresholds": [
+      15.0,
+      25.0,
+      50.0
+    ],
+    "block_days": 7,
+    "n_boot": 1000,
+    "seed": 42,
+    "output_dir": "results_calibracao"
+  },
+  "python": "3.12.3",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39"
+}

@@ -1,0 +1,17 @@
+# Dados sintéticos: roda sem baixar nada (para testar o plugin).
+# Mesmos cortes de configs/benchmark_synthetic.yaml do benchmark.
+data:
+  source: synthetic
+  train_end: 2016-12-31
+  val_end: 2017-06-30
+models:
+  - name: persistence
+  - name: climatology
+  - name: reanalysis_raw
+  - name: linear_regression
+  - name: dom
+  - name: gbm
+  - name: gbm          # aparece como gbm_estendidas nos resultados
+    kwargs: {variaveis: estendidas}
+n_boot: 200
+output_dir: results_calibracao_sintetico

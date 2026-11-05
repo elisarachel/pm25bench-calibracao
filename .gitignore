@@ -1,0 +1,6 @@
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.ipynb_checkpoints/
+results_calibracao_sintetico/

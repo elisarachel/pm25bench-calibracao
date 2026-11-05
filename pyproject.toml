@@ -1,0 +1,44 @@
+[project]
+name = "pm25bench-calibracao"
+version = "0.1.0"
+description = "Modelos de calibração da reanálise (DOM e GBM) como plugin do pm25bench"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pm25bench>=0.1,<0.2",
+    "lightgbm>=4",
+    "numpy",
+    "pandas",
+]
+
+# É esta seção que faz o pm25bench encontrar os modelos.
+[project.entry-points."pm25bench.models"]
+dom = "pm25bench_calibracao.dom:DOM"
+gbm = "pm25bench_calibracao.gbm:GBM"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+notebook = ["jupyter", "matplotlib"]
+
+# O pm25bench não está no PyPI: num `uv sync` feito nesta pasta, usa o clone vizinho.
+[tool.uv.sources]
+pm25bench = { path = "../Benchmark", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "NPY", "SIM"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["lightgbm.*"]
+ignore_missing_imports = true

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# Path: pastas temporárias dos testes
+from pathlib import Path
+
 # numpy: comparações numéricas
 import numpy as np
 
@@ -15,13 +18,15 @@ import pytest
 from pm25bench import Forecaster, load_model, make_samples, make_synthetic, split_by_time
 
 # Sample: tipo das amostras; REANALYSIS_FEATURES: ordem das colunas rea_*
-from pm25bench.data import REANALYSIS_FEATURES, Sample
+from pm25bench.data import REANALYSIS_FEATURES, Sample, station_cd_mun
 
 # _features é privada; importada só para o teste de equivalência abaixo
+from pm25bench.metrics import rmse
 from pm25bench.models.linear import _features
 
 # modelos e funções de variáveis do plugin
 from pm25bench_calibracao import DOM, GBM
+from pm25bench_calibracao.avaliacao import bootstrap_diferenca_pareada
 from pm25bench_calibracao.features import (
     NOMES_BASE,
     NOMES_ESTENDIDAS,
@@ -30,6 +35,7 @@ from pm25bench_calibracao.features import (
     features_estendidas,
     features_previsao,
 )
+from pm25bench_calibracao.media import ESTACOES_SP5, obs_media_horaria, tabela_media
 
 # leads do contrato atual
 LEADS = [0, 1, 2, 3]
@@ -466,3 +472,97 @@ def test_dom_entrada_invalida() -> None:
     # qualquer valor fora de {"reanalise", "previsao"}
     with pytest.raises(ValueError):
         DOM(entrada="outra")
+
+
+# ---------------------------------------------------------------- média de estações
+
+
+def test_obs_media_horaria_exige_estacoes_suficientes(tmp_path: Path) -> None:
+    """A média horária usa as estações válidas e some quando há menos que o mínimo."""
+    # três horas consecutivas
+    horas = pd.date_range("2020-01-01 01:00", periods=3, freq="h")
+    # valores por estação; NaN = hora sem dado
+    valores = {
+        1: [10.0, 10.0, 10.0],
+        2: [20.0, 20.0, np.nan],
+        3: [30.0, np.nan, np.nan],
+        4: [40.0, 40.0, np.nan],
+        5: [np.nan, 30.0, 50.0],
+    }
+    # grava no formato da CETESB: <pasta>/<código>/<ano>.csv
+    for cod, v in valores.items():
+        # pasta da estação
+        (tmp_path / str(cod)).mkdir()
+        # CSV com as colunas datetime,value
+        pd.DataFrame({"datetime": horas, "value": v}).to_csv(
+            tmp_path / str(cod) / "2020.csv", index=False
+        )
+    # média com mínimo de 4 estações por hora
+    m = obs_media_horaria(tmp_path, [1, 2, 3, 4, 5], min_estacoes=4)
+    # hora 1: 4 válidas (média 25); hora 2: 4 válidas (média 25); hora 3: só 2 (fora)
+    assert list(m.values) == [25.0, 25.0]
+    # a hora com poucas estações não aparece
+    assert horas[2] not in m.index
+
+
+def test_tabela_media_exige_mesmo_municipio(tmp_path: Path) -> None:
+    """Estações de municípios diferentes não podem ser combinadas (reanálise municipal)."""
+    # Congonhas (São Paulo) e Bauru
+    with pytest.raises(ValueError, match="municípios diferentes"):
+        tabela_media(tmp_path, tmp_path, estacoes=[73, 108])
+
+
+def test_estacoes_sp5_no_municipio_de_sao_paulo() -> None:
+    """As 5 estações da média estão todas no município de São Paulo."""
+    # código IBGE do município de São Paulo
+    assert {station_cd_mun(e) for e in ESTACOES_SP5} == {3550308}
+
+
+# ---------------------------------------------------------------- bootstrap pareado
+
+
+def _previsoes(pred: np.ndarray, obs: np.ndarray) -> pd.DataFrame:
+    """Tabela de previsões no formato do benchmark, um dia por linha, lead 0."""
+    # datas consecutivas
+    datas = pd.date_range("2023-01-01", periods=len(obs), freq="D")
+    # colunas usadas pelo bootstrap
+    return pd.DataFrame({"issue_date": datas, "lead": 0, "obs": obs, "pred": pred})
+
+
+def test_bootstrap_modelos_iguais_tem_diferenca_zero() -> None:
+    """Dois modelos idênticos: diferença e intervalo exatamente zero."""
+    # série qualquer
+    rng = np.random.default_rng(0)
+    # observação
+    obs = rng.normal(20, 5, 100)
+    # mesma previsão para os dois
+    a = _previsoes(obs + 1, obs)
+    # diferença de RMSE com IC
+    d, lo, hi = bootstrap_diferenca_pareada(a, a.copy(), rmse, n_boot=200)
+    # tudo zero
+    assert d == lo == hi == 0.0
+
+
+def test_bootstrap_detecta_modelo_pior() -> None:
+    """Um modelo com erro maior em todos os dias tem diferença positiva e significativa."""
+    # série qualquer
+    rng = np.random.default_rng(0)
+    # observação
+    obs = rng.normal(20, 5, 200)
+    # modelo A: erro grande
+    a = _previsoes(obs + rng.normal(0, 4, 200), obs)
+    # modelo B: erro pequeno
+    b = _previsoes(obs + rng.normal(0, 1, 200), obs)
+    # diferença RMSE(A) - RMSE(B)
+    d, lo, hi = bootstrap_diferenca_pareada(a, b, rmse, n_boot=300)
+    # positiva e com IC acima de zero
+    assert d > 0 and lo > 0
+
+
+def test_bootstrap_exige_mesmas_amostras() -> None:
+    """Modelos avaliados em amostras diferentes não podem ser pareados."""
+    # observação
+    obs = np.arange(10.0)
+    # A com 10 dias, B com 9
+    with pytest.raises(ValueError, match="mesmas amostras"):
+        bootstrap_diferenca_pareada(_previsoes(obs, obs), _previsoes(obs[:9], obs[:9]), rmse)

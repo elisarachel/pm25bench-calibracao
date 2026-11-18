@@ -129,14 +129,44 @@ valores absurdos e confere que nenhuma previsão muda.
 O `dom_previsao` usa a mesma reta em todos os leads, ou seja, supõe que o viés do CAMS não
 depende do lead. O `gbm_previsao` e a `linear_previsao` ajustam um modelo por lead.
 
+### Experimento principal: média de 5 estações
+
+O alvo é a **média de 5 estações** do município de São Paulo, e não uma estação só: 98
+Grajaú-Parelheiros, 270 Marginal Tietê, 73 Congonhas, 95 Cidade Universitária e 83
+Ibirapuera. São as 5 com pelo menos 78% de dias válidos tanto no treino quanto no teste. O
+conjunto é **fixo**: se a média usasse as estações disponíveis em cada dia, a composição
+mudaria entre treino e teste (6 estações do município só começam em 2023), e o modelo
+confundiria essa mudança com mudança de viés do CAMS.
+
+- Observação: média horária das estações válidas, só nas horas com pelo menos 4 das 5;
+  depois a média diária com a regra das 18 horas do benchmark.
+- Previsão do CAMS: interpolada em cada uma das 5 estações e tirada a média hora a hora,
+  antes da média diária (`benchmark_cams_forecast/data/media_sp5/`).
+- A média se aproxima mais da escala da célula do CAMS (0,4°) do que um ponto, e reduz o
+  erro de representatividade de uma estação isolada.
+
+O `pm25bench run` trabalha com uma estação só, então este experimento roda pelo script
+`scripts/rodar_media.py`, que monta a tabela (`pm25bench_calibracao.media`) e chama
+`run_benchmark` com o mesmo protocolo:
+
 ```bash
-../Benchmark/.venv/bin/pm25bench run configs/benchmark_calibracao_previsao_sintetico.yaml
-../Benchmark/.venv/bin/pm25bench run configs/benchmark_calibracao_previsao.yaml
+../Benchmark/.venv/bin/python scripts/rodar_media.py configs/benchmark_media_sp5_previsao.yaml
+../Benchmark/.venv/bin/python scripts/figuras.py configs/benchmark_media_sp5_previsao.yaml
 ```
 
-A segunda precisa das previsões em `../benchmark_cams_forecast/data` e da reanálise em
-`../dados_benchmark/sisam` (com 2025). O notebook `notebooks/diferenca_pareada.ipynb`
-compara o `gbm_previsao` com os outros modelos deste experimento por bootstrap pareado.
+O primeiro grava `results_media_sp5_previsao/`; o segundo, as figuras do relatório em
+`figuras/` (cada uma responde a uma pergunta, listadas no início do script) e a tabela
+`results_media_sp5_previsao/diferenca_pareada.csv`. O notebook
+`notebooks/diferenca_pareada.ipynb` explica e calcula o bootstrap pareado passo a passo.
+
+Dados necessários: previsões em `../benchmark_cams_forecast/data`, reanálise em
+`../dados_benchmark/sisam` (com 2025) e observações em `../benchmark_pm2_5/data`.
+
+A config sintética (sem baixar dados) continua valendo para testar os modelos:
+
+```bash
+../Benchmark/.venv/bin/pm25bench run configs/benchmark_calibracao_previsao_sintetico.yaml
+```
 
 ## Estrutura
 
@@ -144,10 +174,14 @@ compara o `gbm_previsao` com os outros modelos deste experimento por bootstrap p
 src/pm25bench_calibracao/
 ├── features.py   # features_base, features_estendidas, features_previsao e nomes
 ├── linear.py     # LinearPrevisao
+├── media.py      # tabela da média de estações (ESTACOES_SP5)
+├── avaliacao.py  # bootstrap pareado e tabela de diferenças
 ├── dom.py        # DOM e DOMPrevisao
 └── gbm.py        # GBM e GBMPrevisao (com importancias() por ganho)
+scripts/rodar_media.py, figuras.py
+figuras/                       # figuras do relatório
 tests/test_calibracao.py
 configs/benchmark_calibracao.yaml, benchmark_calibracao_sintetico.yaml
-configs/benchmark_calibracao_previsao.yaml, benchmark_calibracao_previsao_sintetico.yaml
+configs/benchmark_media_sp5_previsao.yaml, benchmark_calibracao_previsao_sintetico.yaml
 notebooks/diferenca_pareada.ipynb
 ```

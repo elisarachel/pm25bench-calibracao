@@ -1,13 +1,12 @@
-# Trilha de previsão do CAMS (não comparável com o leaderboard padrão).
-# Experimento de calibração da previsão: os modelos do plugin (dom_previsao, gbm_previsao,
-# linear_previsao) usam só a previsão do CAMS, as observações até t-1 e o calendário. A
-# reanálise continua na tabela (o benchmark exige) mas nenhum desses modelos a lê, porque ela
-# não existe no momento real da emissão. Os baselines climatology e persistence também não a
-# usam; forecast_raw é a previsão do CAMS sem correção.
-# Baseada em ../Benchmark/configs/benchmark_forecast_local.yaml. A reanálise e as
-# observações vêm do download verificado por hash (o README do benchmark garante que
-# `download` e `local` geram a mesma tabela); as previsões vêm da pasta local, que é a
-# única opção para elas nesta versão do benchmark.
+# Experimento principal: calibração da previsão do CAMS para a MÉDIA de 5 estações do
+# município de São Paulo (98 Grajaú-Parelheiros, 270 Marginal Tietê, 73 Congonhas,
+# 95 Cidade Universitária, 83 Ibirapuera; mínimo de 4 válidas por hora).
+# Rodar com o script (o comando `pm25bench run` usaria uma estação só):
+#   ../Benchmark/.venv/bin/python scripts/rodar_media.py configs/benchmark_media_sp5_previsao.yaml
+#
+# Os modelos do plugin (dom_previsao, gbm_previsao, linear_previsao) usam só a previsão do
+# CAMS, as observações até t-1 e o calendário. A reanálise continua na tabela (o benchmark
+# exige) mas nenhum desses modelos a lê, porque ela não existe no momento real da emissão.
 data:
   # pasta local: reanálise SISAM 2010-2024 do repositório do Ryan (idêntica ao download
   # oficial) + 2025 (arquivo do SISAM); observações do clone de benchmark_pm2_5
@@ -15,7 +14,7 @@ data:
   sisam_dir: ../dados_benchmark/sisam
   cetesb_dir: ../benchmark_pm2_5/data
   cams_forecast_dir: ../benchmark_cams_forecast/data
-  station: 73          # Congonhas (São Paulo)
+  station: 73          # ignorado pelo rodar_media.py (a observação é a média das estações)
   min_hours: 18        # horas válidas mínimas para a média diária
   # divisão definida pelo grupo: treino 2011-2021, validação 2022, teste 2023-2025
   # (o contrato v0.1 do benchmark usa 2011-2019 / 2020-2021 / 2022-2024; os resultados
@@ -38,4 +37,4 @@ thresholds: [15, 25, 50]
 block_days: 7
 n_boot: 1000
 seed: 42
-output_dir: results_calibracao_previsao
+output_dir: results_media_sp5_previsao

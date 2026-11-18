@@ -1,8 +1,8 @@
 {
   "pm25bench_version": "0.1.0",
-  "dataset_hash": "sha256:761d54408052fd1a20e46c8a00abdc4190633192175c39ab5d51239315b6ec47",
-  "station": 73,
-  "n_test_samples": 453,
+  "dataset_hash": "sha256:f9248c59bd8f5151a60aec4074b90cd6fa86ceb0b1312a63b3e37583fae0cb02",
+  "station": "média de 5 estações (98, 270, 73, 95, 83), mínimo de 4 por hora",
+  "n_test_samples": 519,
   "test_period": [
     "2023-01-08",
     "2025-12-31"
@@ -61,7 +61,7 @@
     "block_days": 7,
     "n_boot": 1000,
     "seed": 42,
-    "output_dir": "results_calibracao_previsao"
+    "output_dir": "results_media_sp5_previsao"
   },
   "forecast": true,
   "python": "3.12.3",

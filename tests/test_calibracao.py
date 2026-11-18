@@ -26,7 +26,7 @@ from pm25bench.models.linear import _features
 
 # modelos e funções de variáveis do plugin
 from pm25bench_calibracao import DOM, GBM
-from pm25bench_calibracao.avaliacao import bootstrap_diferenca_pareada
+from pm25bench_calibracao.avaliacao import bootstrap_diferenca_pareada, msess, tabela_categorica
 from pm25bench_calibracao.features import (
     NOMES_BASE,
     NOMES_ESTENDIDAS,
@@ -566,3 +566,35 @@ def test_bootstrap_exige_mesmas_amostras() -> None:
     # A com 10 dias, B com 9
     with pytest.raises(ValueError, match="mesmas amostras"):
         bootstrap_diferenca_pareada(_previsoes(obs, obs), _previsoes(obs[:9], obs[:9]), rmse)
+
+
+def test_msess_casos_conhecidos() -> None:
+    """MSESS: 1 para previsão perfeita, 0 igual à referência, negativo se pior."""
+    # observação
+    o = np.array([10.0, 20.0, 30.0])
+    # referência com erro de 2 em todos os dias
+    ref = o + 2
+    # previsão perfeita
+    assert msess(o, o, ref) == 1.0
+    # tão boa quanto a referência
+    assert msess(o, ref, ref) == 0.0
+    # erro de 4 (MSE 16 contra 4): 1 - 16/4 = -3
+    assert msess(o, o + 4, ref) == pytest.approx(-3.0)
+
+
+def test_tabela_categorica_contingencia() -> None:
+    """POD, FAR, CSI, viés de frequência e acurácia batem com uma contingência feita à mão."""
+    # 6 dias: obs >= 25 nos dias 0, 1 e 2; previsão >= 25 nos dias 0, 1 e 3
+    obs = np.array([30.0, 40.0, 26.0, 10.0, 12.0, 8.0])
+    # previsão
+    pred = np.array([28.0, 35.0, 20.0, 27.0, 11.0, 9.0])
+    # tabela de previsões de um modelo
+    tab = _previsoes(pred, obs).assign(model="m")
+    # métricas no limiar 25
+    r = tabela_categorica(tab, [25.0]).iloc[0]
+    # a = 2 acertos, b = 1 falso alarme, c = 1 perda, d = 2 negativos corretos
+    assert (r["pod"], r["far"], r["csi"]) == pytest.approx((2 / 3, 1 / 3, 2 / 4))
+    # viés de frequência (a+b)/(a+c) = 1 e acurácia (a+d)/n = 4/6
+    assert (r["vies_freq"], r["acuracia"]) == pytest.approx((1.0, 4 / 6))
+    # eventos observados
+    assert r["eventos_obs"] == 3

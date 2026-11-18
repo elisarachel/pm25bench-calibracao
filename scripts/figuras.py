@@ -14,6 +14,12 @@ Cada figura responde a uma pergunta:
 6. ``6_diferenca_pareada.png``: o GBM é melhor que os outros métodos (hipótese)?
 7. ``7_extremos.png``: os métodos subestimam os dias acima do P90?
 8. ``8_serie_teste.png``: onde os métodos erram no período de teste?
+9. ``9_skill_score.png``: quanto cada método melhora sobre a climatologia e sobre o CAMS?
+10. ``10_diagrama_desempenho.png``: os métodos acertam os dias acima dos limiares de
+    qualidade do ar (POD, FAR, CSI e viés de frequência)?
+
+Também grava em ``<output_dir>/``: ``diferenca_pareada.csv``, ``skill.csv`` e
+``metricas_categoricas.csv``.
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ from pm25bench import load_config, split_by_time
 from pm25bench.metrics import rmse
 
 # bootstrap pareado
-from pm25bench_calibracao.avaliacao import tabela_diferencas
+from pm25bench_calibracao.avaliacao import tabela_categorica, tabela_diferencas, tabela_skill
 
 # tabela da média das estações
 from pm25bench_calibracao.media import tabela_media
@@ -511,6 +517,173 @@ def fig_serie_teste(pred: pd.DataFrame, lead: int = 1) -> None:
     salvar(fig, "8_serie_teste.png")
 
 
+def fig_skill(skill: pd.DataFrame) -> None:
+    """9. MSESS por lead contra a climatologia e contra o CAMS bruto, com IC 95% pareado."""
+    # um painel por referência, mesmo eixo y
+    fig, eixos = plt.subplots(1, 2, figsize=(9, 3.4), sharey=True)
+    # referências e títulos
+    painéis = [
+        ("climatology", "referência: climatologia"),
+        ("forecast_raw", "referência: CAMS bruto"),
+    ]
+    # percorre os painéis
+    for ax, (ref, titulo) in zip(eixos, painéis, strict=True):
+        # linhas desta referência
+        t = skill[skill["referencia"] == ref]
+        # métodos presentes, na ordem fixa
+        modelos = [m for m in COR if m in set(t["modelo"])]
+        # deslocamento horizontal para as barras não se sobreporem
+        deslocs = np.linspace(-0.2, 0.2, len(modelos))
+        # percorre os métodos
+        for m, dx in zip(modelos, deslocs, strict=True):
+            # linhas do método, em ordem de lead
+            u = t[t["modelo"] == m].sort_values("lead")
+            # ponto e IC
+            ax.errorbar(
+                u["lead"] + dx,
+                u["msess"],
+                yerr=[u["msess"] - u["ic_lo"], u["ic_hi"] - u["msess"]],
+                fmt=MARCA[m],
+                ms=5,
+                capsize=2,
+                color=COR[m],
+                label=ROTULO[m],
+            )
+        # referência em zero (tão bom quanto a referência)
+        ax.axhline(0, color=CINZA, lw=1)
+        # título do painel
+        ax.set_title(titulo, fontsize=9)
+        # leads
+        ax.set_xticks([0, 1, 2, 3])
+        # eixo x
+        ax.set_xlabel("lead (dias)")
+    # eixo y
+    eixos[0].set_ylabel("MSESS = 1 − MSE / MSE(referência)\n> 0: melhor que a referência")
+    # legenda com todos os métodos (o painel da esquerda tem todos), fora dos dados
+    handles, labels = eixos[0].get_legend_handles_labels()
+    # à direita do último painel
+    eixos[1].legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+    # título geral com a pergunta
+    fig.suptitle(
+        "Quanto cada método melhora sobre a referência? (IC 95%, bootstrap pareado)",
+        x=0.01,
+        ha="left",
+        fontsize=10,
+    )
+    # espaçamento
+    fig.tight_layout()
+    # grava
+    salvar(fig, "9_skill_score.png")
+
+
+def fig_diagrama_desempenho(cat: pd.DataFrame, limiares: list[float], lead: int = 1) -> None:
+    """10. Diagrama de desempenho (Roebber, 2009): POD contra razão de sucesso (1 - FAR).
+
+    As curvas cinza contínuas são o CSI constante; as retas tracejadas que saem da origem
+    são o viés de frequência constante. O canto superior direito é a previsão perfeita.
+    """
+    # um painel por limiar
+    fig, eixos = plt.subplots(
+        1, len(limiares), figsize=(3.4 * len(limiares) + 1.6, 3.6), sharey=True
+    )
+    # grade para as curvas de fundo
+    sr, pd_ = np.meshgrid(np.linspace(0.01, 1, 200), np.linspace(0.01, 1, 200))
+    # CSI em função da razão de sucesso e do POD
+    csi_fundo = 1 / (1 / sr + 1 / pd_ - 1)
+    # percorre os limiares
+    for ax, thr in zip(np.atleast_1d(eixos), limiares, strict=True):
+        # curvas de CSI constante
+        cs = ax.contour(
+            sr, pd_, csi_fundo, levels=[0.1, 0.3, 0.5, 0.7, 0.9], colors=GRADE, linewidths=0.8
+        )
+        # posições dos rótulos: sobre cada curva, na razão de sucesso 0,75 (longe das retas)
+        pos = [(0.75, 1 / (1 / c - 1 / 0.75 + 1)) for c in [0.1, 0.3, 0.5, 0.7]]
+        # rótulos das curvas de CSI
+        ax.clabel(cs, fmt="CSI %.1f", fontsize=6, colors=TINTA2, manual=pos)
+        # retas de viés de frequência constante (POD = viés × SR)
+        for vies in [0.5, 1, 2]:
+            # reta tracejada a partir da origem
+            ax.plot([0, min(1, 1 / vies)], [0, min(1, vies)], color=CINZA, lw=0.7, ls="--")
+            # rótulo junto à ponta da reta, para dentro do gráfico
+            ax.text(
+                min(1, 1 / vies) - 0.01,
+                min(1, vies),
+                f"viés {vies:g}",
+                fontsize=6,
+                color=TINTA2,
+                ha="right",
+                va="bottom" if vies < 1 else "top",
+            )
+        # linhas deste limiar e lead
+        t = cat[(cat["limiar"] == thr) & (cat["lead"] == lead)]
+        # métodos que não previram nenhum evento (FAR indefinido)
+        sem_previsao = []
+        # percorre os métodos na ordem fixa
+        for m in COR:
+            # linha do método
+            u = t[t["modelo"] == m]
+            # sem linha: método fora da tabela
+            if u.empty:
+                continue
+            # nenhum evento previsto: não há ponto, mas o fato é anotado
+            if u[["pod", "far"]].isna().any(axis=None):
+                sem_previsao.append(ROTULO[m])
+                continue
+            # ponto do método
+            ax.scatter(
+                1 - u["far"],
+                u["pod"],
+                s=50,
+                color=COR[m],
+                marker=MARCA[m],
+                zorder=3,
+                edgecolor="white",
+                linewidth=0.8,
+                label=ROTULO[m],
+            )
+        # anota os métodos que nunca previram o evento (POD = 0, sem ponto no diagrama)
+        if sem_previsao:
+            ax.text(
+                0.17,
+                0.6,
+                "nunca previram o evento:\n" + "\n".join(sem_previsao),
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=6,
+                color=TINTA2,
+            )
+        # número de eventos observados
+        n_ev = int(t["eventos_obs"].iloc[0]) if not t.empty else 0
+        # título do painel
+        ax.set_title(f"MP2,5 ≥ {thr:g} µg/m³ ({n_ev} dias com evento)", fontsize=9)
+        # limites do diagrama
+        ax.set_xlim(0, 1)
+        # limites do diagrama
+        ax.set_ylim(0, 1)
+        # eixo x
+        ax.set_xlabel("razão de sucesso (1 − FAR)")
+        # sem grade (as curvas de fundo já servem de guia)
+        ax.grid(False)
+    # eixo y
+    np.atleast_1d(eixos)[0].set_ylabel("POD")
+    # legenda com todos os métodos (o primeiro limiar, mais frequente, tem todos)
+    handles, labels = np.atleast_1d(eixos)[0].get_legend_handles_labels()
+    # título geral com a pergunta
+    fig.suptitle(
+        f"Os métodos acertam os dias acima dos limiares? (lead {lead})",
+        x=0.01,
+        ha="left",
+        fontsize=10,
+    )
+    # espaçamento, reservando a faixa da direita para a legenda
+    fig.tight_layout(rect=(0, 0, 0.86, 1))
+    # legenda na faixa reservada, fora dos painéis
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(0.86, 0.5))
+    # grava
+    salvar(fig, "10_diagrama_desempenho.png")
+
+
 def main() -> None:
     """Gera todas as figuras."""
     # analisador de argumentos
@@ -560,6 +733,24 @@ def main() -> None:
     fig_extremos(pred, p90)
     # série do teste
     fig_serie_teste(pred)
+    # métodos avaliados no skill score
+    metodos = ["dom_previsao", "linear_previsao", "gbm_previsao", "persistence", "forecast_raw"]
+    # parâmetros do bootstrap iguais aos do benchmark
+    args = {"block_days": cfg.block_days, "n_boot": cfg.n_boot, "seed": cfg.seed}
+    # MSESS contra a climatologia e contra o CAMS bruto
+    skill = tabela_skill(pred, metodos, ["climatology", "forecast_raw"], **args)
+    # registra a tabela
+    skill.round(3).to_csv(Path(cfg.output_dir) / "skill.csv", index=False)
+    # figura do skill score
+    fig_skill(skill)
+    # limiares do benchmark (OMS 15, CONAMA 25 e 50)
+    limiares = [float(t) for t in cfg.thresholds]
+    # métricas categóricas de todos os modelos
+    cat = tabela_categorica(pred, limiares)
+    # registra a tabela
+    cat.round(3).to_csv(Path(cfg.output_dir) / "metricas_categoricas.csv", index=False)
+    # diagrama de desempenho
+    fig_diagrama_desempenho(cat, limiares)
 
 
 # executa só quando chamado como script

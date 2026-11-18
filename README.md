@@ -155,8 +155,10 @@ O `pm25bench run` trabalha com uma estação só, então este experimento roda p
 ```
 
 O primeiro grava `results_media_sp5_previsao/`; o segundo, as figuras do relatório em
-`figuras/` (cada uma responde a uma pergunta, listadas no início do script) e a tabela
-`results_media_sp5_previsao/diferenca_pareada.csv`. O notebook
+`figuras/` (cada uma responde a uma pergunta, listadas no início do script) e as tabelas
+`diferenca_pareada.csv` (bootstrap pareado), `skill.csv` (MSESS contra a climatologia e o
+CAMS bruto, com IC) e `metricas_categoricas.csv` (POD, FAR, CSI, ETS, viés de frequência e
+acurácia nos limiares 15, 25 e 50 µg/m³) em `results_media_sp5_previsao/`. O notebook
 `notebooks/diferenca_pareada.ipynb` explica e calcula o bootstrap pareado passo a passo.
 
 Dados necessários: previsões em `../benchmark_cams_forecast/data`, reanálise em

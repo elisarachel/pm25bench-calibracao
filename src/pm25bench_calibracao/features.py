@@ -46,6 +46,29 @@ NOMES_ESTENDIDAS: list[str] = [
 ]
 
 
+#: Nomes das variáveis de ``features_previsao``, na mesma ordem do vetor.
+NOMES_PREVISAO: list[str] = [
+    # começa com as variáveis base
+    *NOMES_BASE,
+    # previsão do CAMS emitida em t para o dia alvo t + lead
+    "fc_pm2_5_alvo",
+    # erro recente da previsão: média de (obs - fc_pm2_5_l0) de t-n+1 a t-1
+    "erro_recente_fc",
+]
+
+
+def exigir_previsao(context: pd.DataFrame, colunas: list[str], modelo: str) -> None:
+    """Levanta ``KeyError`` com mensagem clara se faltar alguma coluna de previsão."""
+    # colunas pedidas que não estão no contexto
+    faltando = [c for c in colunas if c not in context.columns]
+    # sem previsões, as variantes de previsão não têm entrada
+    if faltando:
+        raise KeyError(
+            f"{modelo} precisa das previsões do CAMS ({', '.join(faltando)}): "
+            "informe data.cams_forecast_dir (ou data.synthetic_forecast) no YAML"
+        )
+
+
 def features_base(context: pd.DataFrame) -> np.ndarray:
     """Mesmas variáveis da ``linear_regression`` do benchmark, sem o intercepto.
 
@@ -127,3 +150,49 @@ def features_estendidas(context: pd.DataFrame) -> np.ndarray:
     razao = float(np.sum(obs)) / soma_rea if soma_rea != 0.0 else float("nan")
     # junta tudo na ordem de NOMES_ESTENDIDAS
     return np.concatenate([base, defasagens, [vies, razao]])
+
+
+def features_previsao(context: pd.DataFrame, lead: int) -> np.ndarray:
+    """Variáveis base mais a previsão do CAMS para o dia alvo e o erro recente da previsão.
+
+    Acrescenta a ``features_base``:
+
+    - ``fc_pm2_5_l{lead}`` da linha t: a previsão emitida em t para o dia alvo t + lead;
+    - o erro recente da previsão, ``média(obs(d) - fc_pm2_5_l0(d))`` para d de t-n+1 a t-1.
+      Cada dia d é comparado com a previsão de lead 0 emitida nele mesmo, e os dois valores
+      são conhecidos antes de t. É o viés aditivo recente do CAMS, a mesma informação que
+      uma correção de janela móvel (ADD) usaria.
+
+    Parameters
+    ----------
+    context : pandas.DataFrame
+        Contexto com as colunas ``fc_pm2_5_l0`` e ``fc_pm2_5_l{lead}``.
+    lead : int
+        Lead do modelo que vai usar o vetor.
+
+    Returns
+    -------
+    numpy.ndarray
+        Vetor na ordem de ``NOMES_PREVISAO``.
+
+    Raises
+    ------
+    KeyError
+        Se o contexto não tiver as colunas de previsão.
+    """
+    # coluna da previsão para o dia alvo
+    alvo = f"fc_pm2_5_l{lead}"
+    # confere as colunas antes de usar
+    exigir_previsao(context, sorted({"fc_pm2_5_l0", alvo}), "features_previsao")
+    # parte comum com a regressão do benchmark
+    base = features_base(context)
+    # previsão emitida em t (última linha) para t + lead
+    fc_alvo = float(context[alvo].iloc[-1])
+    # observações de t-n+1 a t-1 (a linha de t fica de fora)
+    obs = context[TARGET].iloc[:-1].to_numpy(dtype="float64")
+    # previsão de lead 0 emitida em cada um desses dias, para o próprio dia
+    fc0 = context["fc_pm2_5_l0"].iloc[:-1].to_numpy(dtype="float64")
+    # erro médio recente da previsão (positivo = CAMS subestima)
+    erro = float(np.mean(obs - fc0))
+    # junta na ordem de NOMES_PREVISAO
+    return np.concatenate([base, [fc_alvo, erro]])

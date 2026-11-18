@@ -8,6 +8,9 @@ import warnings
 # Callable: tipo da função de variáveis; Sequence: tipo da lista de leads
 from collections.abc import Callable, Sequence
 
+# Any: tipo dos argumentos repassados em GBMPrevisao
+from typing import Any
+
 # LightGBM: implementação do gradient boosting de árvores
 import lightgbm as lgb
 
@@ -24,16 +27,24 @@ from pm25bench import make_samples
 from pm25bench_calibracao.features import (
     NOMES_BASE,
     NOMES_ESTENDIDAS,
+    NOMES_PREVISAO,
+    exigir_previsao,
     features_base,
     features_estendidas,
+    features_previsao,
 )
 
+#: Tipo das funções de variáveis: (contexto, lead) -> vetor.
+FuncaoVariaveis = Callable[[pd.DataFrame, int], np.ndarray]
+
 #: Função de variáveis e lista de nomes para cada valor aceito de ``variaveis``.
-_VARIANTES: dict[str, tuple[Callable[[pd.DataFrame], np.ndarray], list[str]]] = {
-    # mesmas entradas da linear_regression do benchmark
-    "base": (features_base, NOMES_BASE),
-    # entradas base mais defasagens e viés recente
-    "estendidas": (features_estendidas, NOMES_ESTENDIDAS),
+_VARIANTES: dict[str, tuple[FuncaoVariaveis, list[str]]] = {
+    # mesmas entradas da linear_regression do benchmark (iguais em todos os leads)
+    "base": (lambda ctx, lead: features_base(ctx), NOMES_BASE),
+    # entradas base mais defasagens e viés recente (iguais em todos os leads)
+    "estendidas": (lambda ctx, lead: features_estendidas(ctx), NOMES_ESTENDIDAS),
+    # entradas base mais a previsão do CAMS para o dia alvo (dependem do lead)
+    "previsao": (features_previsao, NOMES_PREVISAO),
 }
 
 
@@ -64,8 +75,10 @@ class GBM:
         Dias de contexto para montar as amostras de treino (igual ao do benchmark).
     leads : sequence of int
         Leads para os quais um modelo é treinado.
-    variaveis : {"base", "estendidas"}
-        Conjunto de variáveis de entrada (ver ``pm25bench_calibracao.features``).
+    variaveis : {"base", "estendidas", "previsao"}
+        Conjunto de variáveis de entrada (ver ``pm25bench_calibracao.features``). Com
+        ``"previsao"`` (trilha de previsão do CAMS), o modelo de cada lead k recebe a
+        previsão emitida em t para t + k, ``features_previsao(context, k)``.
     seed : int
         Semente do LightGBM, para resultados reprodutíveis.
     learning_rate : float
@@ -97,7 +110,9 @@ class GBM:
     ) -> None:
         # só duas variantes são aceitas; qualquer outra é erro de configuração
         if variaveis not in _VARIANTES:
-            raise ValueError(f"variaveis deve ser 'base' ou 'estendidas', não {variaveis!r}")
+            raise ValueError(
+                f"variaveis deve ser 'base', 'estendidas' ou 'previsao', não {variaveis!r}"
+            )
         # nome distinto por variante para o runner não misturar os resultados
         self.name = "gbm" if variaveis == "base" else f"gbm_{variaveis}"
         # guarda os argumentos do construtor
@@ -140,31 +155,40 @@ class GBM:
         # número de árvores escolhido para cada lead
         self._iteracoes: dict[int, int] = {}
 
-    def _matriz(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        """Monta ``X`` (variáveis) e ``y`` (alvos, uma coluna por lead) de uma tabela diária."""
+    def _matrizes(self, df: pd.DataFrame) -> tuple[list[np.ndarray], np.ndarray]:
+        """Monta ``X`` de cada lead (lista) e ``y`` (uma coluna por lead) de uma tabela diária."""
+        # na trilha de previsão, a tabela precisa ter as colunas fc_*
+        if self.variaveis == "previsao":
+            # colunas de lead 0 (erro recente) e de cada lead treinado
+            cols = sorted({"fc_pm2_5_l0", *(f"fc_pm2_5_l{k}" for k in self._leads)})
+            # erro claro antes de gerar amostras
+            exigir_previsao(df, cols, self.name)
         # amostras com contexto e alvos completos, como no teste
         amostras = list(make_samples(df, self.n_context, self._leads))
         # sem amostras, devolve matrizes vazias com o número certo de colunas
         if not amostras:
-            return np.empty((0, len(self._nomes))), np.empty((0, len(self._leads)))
-        # uma linha de variáveis por amostra
-        x = np.stack([self._features(s.context) for s in amostras])
+            # uma matriz vazia por lead
+            vazias = [np.empty((0, len(self._nomes))) for _ in self._leads]
+            # devolve as vazias e um y vazio
+            return vazias, np.empty((0, len(self._leads)))
+        # uma matriz de variáveis por lead (iguais entre leads nas variantes base/estendidas)
+        xs = [np.stack([self._features(s.context, lead) for s in amostras]) for lead in self._leads]
         # uma linha de alvos (um por lead) por amostra
         y = np.stack([s.target for s in amostras])
-        # devolve o par (X, y)
-        return x, y
+        # devolve as matrizes por lead e os alvos
+        return xs, y
 
     def fit(self, train: pd.DataFrame, val: pd.DataFrame | None = None) -> None:
         """Treina um modelo por lead; a validação serve só para a parada antecipada."""
         # matrizes de treino
-        x_tr, y_tr = self._matriz(train)
+        xs_tr, y_tr = self._matrizes(train)
         # sem amostras de treino não há o que ajustar
-        if len(x_tr) == 0:
+        if len(y_tr) == 0:
             raise ValueError("treino sem amostras válidas")
-        # matrizes de validação, ou vazias se não houver validação
-        x_va, y_va = self._matriz(val) if val is not None else (np.empty((0, 0)), None)
+        # matrizes de validação, ou nada se não houver validação
+        xs_va, y_va = self._matrizes(val) if val is not None else ([], np.empty((0, 0)))
         # a parada antecipada só é possível com amostras de validação
-        usa_validacao = y_va is not None and len(x_va) > 0
+        usa_validacao = len(y_va) > 0
         # sem validação, avisa que o número de árvores será fixo
         if not usa_validacao:
             warnings.warn(
@@ -175,11 +199,11 @@ class GBM:
         # um modelo independente por lead
         for j, lead in enumerate(self._leads):
             # conjunto de treino do LightGBM para este lead (coluna j de y)
-            d_tr = lgb.Dataset(x_tr, label=y_tr[:, j], feature_name=self._nomes)
+            d_tr = lgb.Dataset(xs_tr[j], label=y_tr[:, j], feature_name=self._nomes)
             # caminho com validação e parada antecipada
-            if usa_validacao and y_va is not None:
+            if usa_validacao:
                 # validação referenciada ao treino (usa os mesmos limites de histograma)
-                d_va = lgb.Dataset(x_va, label=y_va[:, j], reference=d_tr)
+                d_va = lgb.Dataset(xs_va[j], label=y_va[:, j], reference=d_tr)
                 # treina até max_rounds, parando se a validação não melhorar
                 modelo = lgb.train(
                     self._params,
@@ -205,8 +229,6 @@ class GBM:
         # o protocolo exige fit antes de predict
         if not self._modelos:
             raise RuntimeError("chame fit antes de predict")
-        # vetor de variáveis do contexto, como matriz de uma linha
-        x = self._features(context).reshape(1, -1)
         # maior lead treinado, usado quando pedem um lead sem modelo
         maior = max(self._modelos)
         # previsões na ordem dos leads pedidos
@@ -215,6 +237,8 @@ class GBM:
         for lead in leads:
             # modelo do lead, ou o do maior lead treinado (como a linear_regression)
             chave = lead if lead in self._modelos else maior
+            # vetor de variáveis do contexto para o lead do modelo, como matriz de uma linha
+            x = self._features(context, chave).reshape(1, -1)
             # previsão usando só as árvores até a melhor iteração (array de 1 elemento)
             prev = self._modelos[chave].predict(x, num_iteration=self._iteracoes[chave])
             # extrai o único valor como float
@@ -253,3 +277,13 @@ class GBM:
         tabela.columns.name = "lead"
         # devolve a tabela
         return tabela
+
+
+class GBMPrevisao(GBM):
+    """``GBM(variaveis="previsao")``, registrado como ``gbm_previsao``."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        # não deixa trocar a variante por kwargs
+        kwargs.pop("variaveis", None)
+        # mesma classe, com as variáveis de previsão do CAMS
+        super().__init__(variaveis="previsao", **kwargs)

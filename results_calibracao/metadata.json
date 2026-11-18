@@ -1,22 +1,24 @@
 {
   "pm25bench_version": "0.1.0",
-  "dataset_hash": "sha256:53303ce1ac8a540e1257bf0618dfad39ce28950fa7f1eadb15318f30ae085c48",
+  "dataset_hash": "sha256:52561013b83d7a77dd2252f88c8e5802090b61dcdb068c44a2bc166162377391",
   "station": 73,
-  "n_test_samples": 732,
+  "n_test_samples": 638,
   "test_period": [
-    "2022-01-08",
-    "2024-12-31"
+    "2023-01-08",
+    "2025-12-31"
   ],
   "config": {
     "data": {
-      "source": "download",
-      "sisam_dir": null,
-      "cetesb_dir": null,
+      "source": "local",
+      "sisam_dir": "../dados_benchmark/sisam",
+      "cetesb_dir": "../benchmark_pm2_5/data",
       "station": 73,
       "min_hours": 18,
-      "train_end": "2019-12-31",
-      "val_end": "2021-12-31",
-      "gap_days": 7
+      "train_end": "2021-12-31",
+      "val_end": "2022-12-31",
+      "gap_days": 7,
+      "cams_forecast_dir": null,
+      "synthetic_forecast": false
     },
     "models": [
       {
@@ -67,6 +69,7 @@
     "seed": 42,
     "output_dir": "results_calibracao"
   },
+  "forecast": false,
   "python": "3.12.3",
   "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39"
 }

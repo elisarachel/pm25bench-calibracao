@@ -14,6 +14,12 @@ import pandas as pd
 # nome da coluna observada ("obs")
 from pm25bench.data import TARGET
 
+# verificação das colunas de previsão
+from pm25bench_calibracao.features import exigir_previsao
+
+#: Valores aceitos de ``entrada``.
+ENTRADAS = ("reanalise", "previsao")
+
 
 class DOM:
     """Regressão linear ``obs = a + b·rea`` ajustada nos dias de contexto de cada amostra.
@@ -38,21 +44,41 @@ class DOM:
     tão poucos pontos a inclinação ``b`` é instável. Usar 14 dias exigiria
     ``n_context = 15``, uma mudança de contrato do benchmark.
 
-    Como não existe previsão da reanálise para t+k neste contrato, o mesmo valor (a
-    calibração do dia t) é devolvido para todos os leads.
+    Com ``entrada="reanalise"`` (padrão), como não existe previsão da reanálise para t+k no
+    contrato padrão, o mesmo valor (a calibração do dia t) é devolvido para todos os leads.
+
+    Com ``entrada="previsao"`` (trilha de previsão do CAMS), a reta é ajustada nos pares
+    (``fc_pm2_5_l0(d)``, ``obs(d)``) de d = t-n+1 a t-1, cada dia comparado com a previsão de
+    lead 0 emitida nele mesmo, e aplicada a ``fc_pm2_5_l{k}(t)`` para cada lead k: um valor
+    por lead. É a forma clássica de Model Output Statistics com janela móvel. A reta de lead
+    0 é usada em todos os leads, supondo que o viés do CAMS não depende do lead; o erro que
+    cresce com o lead não é corrigido.
 
     Parameters
     ----------
     min_pares : int
         Número mínimo de pares válidos na janela para ajustar a reta.
     var_min : float
-        Variância amostral mínima de ``rea_pm2_5`` na janela para ajustar a reta.
+        Variância amostral mínima da variável explicativa na janela para ajustar a reta.
+    entrada : {"reanalise", "previsao"}
+        Variável calibrada: a reanálise do SISAM ou a previsão do CAMS.
     """
 
-    # nome usado pelo runner para identificar os resultados
-    name = "dom"
+    # declarado na classe para cumprir o protocolo Forecaster; o valor é definido no __init__
+    name: str
 
-    def __init__(self, min_pares: int = 3, var_min: float = 1e-6) -> None:
+    def __init__(
+        self, min_pares: int = 3, var_min: float = 1e-6, entrada: str = "reanalise"
+    ) -> None:
+        # só duas entradas são aceitas; qualquer outra é erro de configuração
+        if entrada not in ENTRADAS:
+            raise ValueError(f"entrada deve ser 'reanalise' ou 'previsao', não {entrada!r}")
+        # nome distinto por entrada para o runner não misturar os resultados
+        self.name = "dom" if entrada == "reanalise" else "dom_previsao"
+        # guarda a entrada escolhida
+        self.entrada = entrada
+        # coluna explicativa na janela: reanálise do dia ou previsão de lead 0 do dia
+        self._x = "rea_pm2_5" if entrada == "reanalise" else "fc_pm2_5_l0"
         # guarda o número mínimo de pares para o ajuste
         self.min_pares = min_pares
         # guarda a variância mínima da reanálise para o ajuste
@@ -62,36 +88,54 @@ class DOM:
 
     def fit(self, train: pd.DataFrame, val: pd.DataFrame | None = None) -> None:
         """Calcula o fator de escala de reserva no treino. A validação não é usada."""
-        # dias do treino em que observação e reanálise são ambas válidas
-        ok = train[[TARGET, "rea_pm2_5"]].dropna()
-        # soma da reanálise nesses dias (denominador da razão)
-        soma_rea = float(ok["rea_pm2_5"].sum())
-        # razão das somas = média(obs) / média(rea); 1.0 se o treino não tiver dados
+        # na trilha de previsão, o treino precisa ter as colunas fc_*
+        if self.entrada == "previsao":
+            exigir_previsao(train, [self._x], self.name)
+        # dias do treino em que observação e variável explicativa são ambas válidas
+        ok = train[[TARGET, self._x]].dropna()
+        # soma da variável explicativa nesses dias (denominador da razão)
+        soma_rea = float(ok[self._x].sum())
+        # razão das somas = média(obs) / média(x); 1.0 se o treino não tiver dados
         self._escala = float(ok[TARGET].sum()) / soma_rea if soma_rea > 0 else 1.0
 
     def predict(self, context: pd.DataFrame, leads: Sequence[int]) -> np.ndarray:
-        """Calibra a reanálise do dia t com a reta ajustada nos dias t-n+1 ... t-1."""
+        """Calibra a entrada do dia t com a reta ajustada nos dias t-n+1 ... t-1."""
         # o protocolo exige fit antes de predict, como nos baselines do benchmark
         if self._escala is None:
             raise RuntimeError("chame fit antes de predict")
+        # valores a calibrar, um por lead
+        if self.entrada == "previsao":
+            # colunas da previsão emitida em t para cada t + k
+            cols = [f"fc_pm2_5_l{k}" for k in leads]
+            # confere as colunas antes de usar
+            exigir_previsao(context, sorted({self._x, *cols}), self.name)
+            # previsões da linha t (emitidas em t), uma por lead
+            x_t = context[cols].iloc[-1].to_numpy(dtype="float64")
+        else:
+            # a reanálise do dia t, repetida para todos os leads
+            x_t = np.full(len(leads), float(context["rea_pm2_5"].iloc[-1]))
         # janela de treino: todas as linhas menos a última (a obs de t nunca é lida)
-        janela = context[["rea_pm2_5", TARGET]].iloc[:-1].dropna()
-        # reanálise na janela (variável explicativa)
-        rea = janela["rea_pm2_5"].to_numpy(dtype="float64")
+        janela = context[[self._x, TARGET]].iloc[:-1].dropna()
+        # variável explicativa na janela
+        x = janela[self._x].to_numpy(dtype="float64")
         # observação na janela (variável resposta)
         obs = janela[TARGET].to_numpy(dtype="float64")
-        # reanálise do dia t, o valor a calibrar
-        rea_t = float(context["rea_pm2_5"].iloc[-1])
-        # a reta só é estimável com pares suficientes e reanálise que varia na janela
-        if len(rea) >= self.min_pares and float(np.var(rea, ddof=1)) > self.var_min:
+        # a reta só é estimável com pares suficientes e x que varia na janela
+        if len(x) >= self.min_pares and float(np.var(x, ddof=1)) > self.var_min:
             # polyfit de grau 1 devolve [b, a] (maior grau primeiro) pela solução OLS
-            b, a = np.polyfit(rea, obs, 1)
-            # aplica a reta ao dia t
-            valor = float(a + b * rea_t)
+            b, a = np.polyfit(x, obs, 1)
+            # aplica a reta a cada valor do dia t
+            valores = a + b * x_t
         else:
             # reserva: correção multiplicativa fixa estimada no treino
-            valor = self._escala * rea_t
+            valores = self._escala * x_t
         # concentração negativa não tem sentido físico
-        valor = max(valor, 0.0)
-        # mesma calibração para todos os leads
-        return np.full(len(leads), valor)
+        return np.asarray(np.maximum(valores, 0.0), dtype="float64")
+
+
+class DOMPrevisao(DOM):
+    """``DOM(entrada="previsao")``, registrado como ``dom_previsao``."""
+
+    def __init__(self, min_pares: int = 3, var_min: float = 1e-6) -> None:
+        # mesma classe, com a previsão do CAMS como entrada
+        super().__init__(min_pares=min_pares, var_min=var_min, entrada="previsao")

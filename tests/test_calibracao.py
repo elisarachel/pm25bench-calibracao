@@ -25,8 +25,10 @@ from pm25bench_calibracao import DOM, GBM
 from pm25bench_calibracao.features import (
     NOMES_BASE,
     NOMES_ESTENDIDAS,
+    NOMES_PREVISAO,
     features_base,
     features_estendidas,
+    features_previsao,
 )
 
 # leads do contrato atual
@@ -305,3 +307,139 @@ def test_gbm_lead_sem_modelo_usa_o_maior(
     pred = model.predict(ctx, [1, 3])
     # mesmo valor
     assert pred[0] == pred[1]
+
+
+# ---------------------------------------------------------------- trilha de previsão do CAMS
+
+
+@pytest.fixture(scope="module")
+def dados_fc() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Dados sintéticos com as colunas fc_pm2_5_l0 ... fc_pm2_5_l3, mesmos cortes."""
+    # tabela sintética com previsão, dividida em blocos de tempo
+    return split_by_time(make_synthetic(forecast=True), "2016-12-31", "2017-06-30")
+
+
+@pytest.fixture(scope="module")
+def modelos_previsao(
+    dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> list[DOM | GBM]:
+    """dom_previsao e gbm_previsao carregados pelo registro e ajustados uma vez."""
+    # separa treino e validação
+    train, val, _ = dados_fc
+    # carrega pelos entry points, como o runner faz
+    modelos: list[DOM | GBM] = [
+        load_model("dom_previsao"),  # type: ignore[list-item]
+        load_model("gbm_previsao", **GBM_RAPIDO),  # type: ignore[list-item]
+    ]
+    # ajusta cada um
+    for m in modelos:
+        m.fit(train, val)
+    # devolve os modelos prontos
+    return modelos
+
+
+def test_previsao_cumpre_o_protocolo(
+    modelos_previsao: list[DOM | GBM],
+    dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """As variantes de previsão têm nome próprio e devolvem um valor válido por lead."""
+    # amostras do teste com previsão
+    amostras = list(make_samples(dados_fc[2], 7, LEADS))
+    # nomes registrados, na ordem do fixture
+    assert [m.name for m in modelos_previsao] == ["dom_previsao", "gbm_previsao"]
+    # cada modelo
+    for m in modelos_previsao:
+        # cumpre o protocolo estrutural
+        assert isinstance(m, Forecaster)
+        # previsão em uma amostra
+        pred = m.predict(amostras[0].context, LEADS)
+        # forma, finitude e não negatividade
+        assert pred.shape == (4,) and np.isfinite(pred).all() and (pred >= 0).all()
+
+
+def test_dom_previsao_recupera_a_reta_por_lead(
+    dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Com obs = 2 + 1,5·fc_l0 na janela, cada lead recebe 2 + 1,5·fc_l{k}(t)."""
+    # contexto base (a reanálise não é usada por esta variante)
+    ctx = _contexto([10.0] * 7, [0.0] * 6)
+    # previsão de lead 0 variando na janela
+    ctx["fc_pm2_5_l0"] = [10.0, 14.0, 9.0, 20.0, 16.0, 12.0, 18.0]
+    # previsões da linha t para os leads 1 a 3 (as outras linhas não são usadas)
+    for k, v in zip([1, 2, 3], [21.0, 25.0, 30.0], strict=True):
+        ctx[f"fc_pm2_5_l{k}"] = v
+    # observação exatamente na reta nos dias da janela
+    ctx.iloc[:-1, ctx.columns.get_loc("obs")] = 2 + 1.5 * ctx["fc_pm2_5_l0"].iloc[:-1]
+    # modelo ajustado no treino com previsão
+    model = DOM(entrada="previsao")
+    # define a escala de reserva
+    model.fit(dados_fc[0])
+    # previsões da linha t, uma por lead
+    fc_t = np.array([18.0, 21.0, 25.0, 30.0])
+    # um valor por lead, cada um na reta
+    np.testing.assert_allclose(model.predict(ctx, LEADS), 2 + 1.5 * fc_t, rtol=0, atol=1e-9)
+
+
+@pytest.mark.parametrize("nome", ["dom_previsao", "gbm_previsao"])
+def test_previsao_sem_colunas_falha(
+    nome: str,
+    dados: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Sem as colunas fc_*, o fit levanta KeyError com a dica de configuração."""
+    # modelo pelo registro
+    model = load_model(nome)
+    # dados sintéticos SEM previsão
+    train, val, _ = dados
+    # mensagem explica o que falta configurar
+    with pytest.raises(KeyError, match="cams_forecast_dir"):
+        model.fit(train, val)
+
+
+def test_features_previsao_sem_colunas_falha(amostras_teste: list[Sample]) -> None:
+    """A função de variáveis também acusa a falta das colunas."""
+    # contexto sem fc_*
+    with pytest.raises(KeyError, match="cams_forecast_dir"):
+        features_previsao(amostras_teste[0].context, 0)
+
+
+def test_previsao_sem_vazamento(
+    modelos_previsao: list[DOM | GBM],
+    dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Trocar a obs do dia t não muda a previsão das variantes de previsão."""
+    # amostra de teste qualquer
+    s = list(make_samples(dados_fc[2], 7, LEADS))[10]
+    # cópia do contexto com um valor absurdo na obs de t
+    alterado = s.context.copy()
+    # última linha, coluna obs
+    alterado.iloc[-1, alterado.columns.get_loc("obs")] = 999.0
+    # cada modelo precisa dar exatamente o mesmo resultado
+    for m in modelos_previsao:
+        np.testing.assert_array_equal(m.predict(s.context, LEADS), m.predict(alterado, LEADS))
+
+
+def test_features_previsao(amostras_teste: list[Sample]) -> None:
+    """features_previsao = base + fc do dia alvo + erro recente de fc_l0."""
+    # amostra com previsão
+    df = make_synthetic(forecast=True)
+    # primeira amostra completa
+    s = next(make_samples(df, 7, LEADS))
+    # vetor para o lead 2
+    v = features_previsao(s.context, 2)
+    # tamanho igual ao da lista de nomes
+    assert len(v) == len(NOMES_PREVISAO)
+    # começa com as variáveis base
+    np.testing.assert_array_equal(v[: len(NOMES_BASE)], features_base(s.context))
+    # previsão do dia alvo = fc_l2 da linha t
+    assert v[-2] == s.context["fc_pm2_5_l2"].iloc[-1]
+    # erro recente = média de obs - fc_l0 nas linhas antes de t
+    ctx = s.context.iloc[:-1]
+    # mesma conta, feita à parte
+    assert v[-1] == pytest.approx(float((ctx["obs"] - ctx["fc_pm2_5_l0"]).mean()))
+
+
+def test_dom_entrada_invalida() -> None:
+    """Entrada desconhecida é erro de configuração."""
+    # qualquer valor fora de {"reanalise", "previsao"}
+    with pytest.raises(ValueError):
+        DOM(entrada="outra")

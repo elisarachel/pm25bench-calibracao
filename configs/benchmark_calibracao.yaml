@@ -1,13 +1,20 @@
 # Cópia de ../Benchmark/configs/benchmark.yaml (contrato do pm25bench v0.1).
-# data, n_context, leads, thresholds, block_days, n_boot e seed são IDÊNTICOS ao oficial,
-# para que o dataset_hash e as amostras de teste sejam os mesmos. Só mudam os modelos e a
-# pasta de saída (output_dir não entra no hash).
+# n_context, leads, thresholds, block_days, n_boot e seed são iguais ao oficial. Os dados
+# vão até 2025 (o oficial vai até 2024) e a divisão treino/validação/teste segue o grupo
+# (abaixo), então o dataset_hash e as amostras de teste diferem das do leaderboard oficial.
 data:
-  source: download
+  # pasta local: reanálise SISAM 2010-2024 do repositório do Ryan (idêntica ao download
+  # oficial) + 2025 (arquivo do SISAM); observações do clone de benchmark_pm2_5
+  source: local
+  sisam_dir: ../dados_benchmark/sisam
+  cetesb_dir: ../benchmark_pm2_5/data
   station: 73          # Congonhas (São Paulo)
   min_hours: 18        # horas válidas mínimas para a média diária
-  train_end: 2019-12-31
-  val_end: 2021-12-31  # teste: 2022-2024
+  # divisão definida pelo grupo: treino 2011-2021, validação 2022, teste 2023-2025
+  # (o contrato v0.1 do benchmark usa 2011-2019 / 2020-2021 / 2022-2024; os resultados
+  # desta config não se comparam com o leaderboard oficial)
+  train_end: 2021-12-31
+  val_end: 2022-12-31  # teste: a partir de 2023-01-08 (até onde houver reanálise)
   gap_days: 7
 
 models:

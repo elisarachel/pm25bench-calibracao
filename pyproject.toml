@@ -15,6 +15,8 @@ dependencies = [
 [project.entry-points."pm25bench.models"]
 dom = "pm25bench_calibracao.dom:DOM"
 gbm = "pm25bench_calibracao.gbm:GBM"
+dom_previsao = "pm25bench_calibracao.dom:DOMPrevisao"
+gbm_previsao = "pm25bench_calibracao.gbm:GBMPrevisao"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]

@@ -2,13 +2,14 @@
 
 - ``DOM``: correção linear local (OLS) ajustada na janela de contexto de cada amostra.
 - ``GBM``: gradient boosting de árvores (LightGBM), um regressor por lead.
-- ``DOMPrevisao`` e ``GBMPrevisao``: as mesmas ideias aplicadas à previsão do CAMS (trilha
-  de previsão do pm25bench, colunas ``fc_*``).
+- ``DOMPrevisao``, ``GBMPrevisao`` e ``LinearPrevisao``: calibração da previsão do CAMS
+  (colunas ``fc_*``), só com informação disponível na manhã do dia t (sem reanálise).
 """
 
 # reexporta as classes registradas como plugins
 from pm25bench_calibracao.dom import DOM, DOMPrevisao
 from pm25bench_calibracao.gbm import GBM, GBMPrevisao
+from pm25bench_calibracao.linear import LinearPrevisao
 
 # API pública do pacote
-__all__ = ["DOM", "GBM", "DOMPrevisao", "GBMPrevisao"]
+__all__ = ["DOM", "GBM", "DOMPrevisao", "GBMPrevisao", "LinearPrevisao"]

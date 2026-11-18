@@ -8,7 +8,7 @@ models:
   - name: persistence
   - name: climatology
   - name: forecast_raw
-  - name: linear_regression
+  - name: linear_previsao  # mesmas entradas do gbm_previsao (sem reanálise)
   - name: dom_previsao
   - name: gbm_previsao
 n_boot: 200

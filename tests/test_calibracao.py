@@ -323,13 +323,14 @@ def dados_fc() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 def modelos_previsao(
     dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
 ) -> list[DOM | GBM]:
-    """dom_previsao e gbm_previsao carregados pelo registro e ajustados uma vez."""
+    """dom_previsao, gbm_previsao e linear_previsao carregados pelo registro e ajustados."""
     # separa treino e validação
     train, val, _ = dados_fc
     # carrega pelos entry points, como o runner faz
     modelos: list[DOM | GBM] = [
         load_model("dom_previsao"),  # type: ignore[list-item]
         load_model("gbm_previsao", **GBM_RAPIDO),  # type: ignore[list-item]
+        load_model("linear_previsao"),  # type: ignore[list-item]
     ]
     # ajusta cada um
     for m in modelos:
@@ -346,7 +347,7 @@ def test_previsao_cumpre_o_protocolo(
     # amostras do teste com previsão
     amostras = list(make_samples(dados_fc[2], 7, LEADS))
     # nomes registrados, na ordem do fixture
-    assert [m.name for m in modelos_previsao] == ["dom_previsao", "gbm_previsao"]
+    assert [m.name for m in modelos_previsao] == ["dom_previsao", "gbm_previsao", "linear_previsao"]
     # cada modelo
     for m in modelos_previsao:
         # cumpre o protocolo estrutural
@@ -380,7 +381,7 @@ def test_dom_previsao_recupera_a_reta_por_lead(
     np.testing.assert_allclose(model.predict(ctx, LEADS), 2 + 1.5 * fc_t, rtol=0, atol=1e-9)
 
 
-@pytest.mark.parametrize("nome", ["dom_previsao", "gbm_previsao"])
+@pytest.mark.parametrize("nome", ["dom_previsao", "gbm_previsao", "linear_previsao"])
 def test_previsao_sem_colunas_falha(
     nome: str,
     dados: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
@@ -419,7 +420,7 @@ def test_previsao_sem_vazamento(
 
 
 def test_features_previsao(amostras_teste: list[Sample]) -> None:
-    """features_previsao = base + fc do dia alvo + erro recente de fc_l0."""
+    """features_previsao = fc do dia alvo, erro recente, obs passada e sazonalidade."""
     # amostra com previsão
     df = make_synthetic(forecast=True)
     # primeira amostra completa
@@ -428,14 +429,36 @@ def test_features_previsao(amostras_teste: list[Sample]) -> None:
     v = features_previsao(s.context, 2)
     # tamanho igual ao da lista de nomes
     assert len(v) == len(NOMES_PREVISAO)
-    # começa com as variáveis base
-    np.testing.assert_array_equal(v[: len(NOMES_BASE)], features_base(s.context))
+    # nenhuma variável de reanálise na lista de nomes
+    assert not any(n.startswith("rea_") for n in NOMES_PREVISAO)
     # previsão do dia alvo = fc_l2 da linha t
-    assert v[-2] == s.context["fc_pm2_5_l2"].iloc[-1]
-    # erro recente = média de obs - fc_l0 nas linhas antes de t
+    assert v[0] == s.context["fc_pm2_5_l2"].iloc[-1]
+    # dias antes de t
     ctx = s.context.iloc[:-1]
-    # mesma conta, feita à parte
-    assert v[-1] == pytest.approx(float((ctx["obs"] - ctx["fc_pm2_5_l0"]).mean()))
+    # erro recente = média de obs - fc_l0 nas linhas antes de t
+    assert v[1] == pytest.approx(float((ctx["obs"] - ctx["fc_pm2_5_l0"]).mean()))
+    # obs de t-1 e média das obs antes de t
+    assert v[2] == ctx["obs"].iloc[-1] and v[3] == pytest.approx(ctx["obs"].mean())
+
+
+def test_previsao_nao_usa_reanalise(
+    modelos_previsao: list[DOM | GBM],
+    dados_fc: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Trocar toda a reanálise do contexto por lixo não muda nenhuma previsão.
+
+    Garante que o experimento de calibração da previsão só usa informação disponível na
+    manhã de t: a reanálise, produzida com meses de atraso, não pode influenciar.
+    """
+    # amostra de teste qualquer
+    s = list(make_samples(dados_fc[2], 7, LEADS))[10]
+    # cópia do contexto
+    alterado = s.context.copy()
+    # todas as colunas rea_*, em todos os dias, viram um valor absurdo
+    alterado[REANALYSIS_FEATURES] = 999.0
+    # cada modelo precisa dar exatamente o mesmo resultado
+    for m in modelos_previsao:
+        np.testing.assert_array_equal(m.predict(s.context, LEADS), m.predict(alterado, LEADS))
 
 
 def test_dom_entrada_invalida() -> None:

@@ -108,36 +108,42 @@ dão o mesmo resultado. Para medir a variação entre sementes seria preciso rod
 sementes com nomes distintos, o que esta versão não faz: o nome do modelo depende só da
 variante.
 
-## Trilha de previsão do CAMS
+## Calibração da previsão do CAMS
 
 Com a trilha opcional de previsão do pm25bench (`data.cams_forecast_dir`, branch
 `feat/previsao-cams-opcional` do benchmark), o contexto traz as colunas `fc_pm2_5_l{k}`: a
 previsão do CAMS emitida às 00 UTC de *t* para o dia *t*+*k*, em média diária na estação.
-Dois modelos usam essas colunas para uma previsão calibrada (*Model Output Statistics*):
+
+Os modelos deste experimento usam **só informação disponível na manhã de *t***: a previsão
+do CAMS, as observações até *t*−1 e o calendário. A reanálise continua na tabela do
+benchmark, mas nenhum deles a lê, porque ela é produzida com meses de atraso e não existe
+no momento real da emissão. Um teste automático troca toda a reanálise do contexto por
+valores absurdos e confere que nenhuma previsão muda.
 
 | modelo | ideia |
 |---|---|
 | `dom_previsao` | reta `obs = a + b·fc_l0` ajustada nos dias *t*−6 a *t*−1 (cada dia comparado com a previsão de lead 0 emitida nele), aplicada a `fc_l{k}(t)` em cada lead |
-| `gbm_previsao` | GBM com as variáveis base, mais a previsão para o dia alvo e o erro recente `média(obs − fc_l0)` |
+| `gbm_previsao` | LightGBM por lead com a previsão para o dia alvo, o erro recente `média(obs − fc_l0)`, a observação de *t*−1, a média das observações do contexto e a sazonalidade |
+| `linear_previsao` | regressão ridge por lead com **as mesmas variáveis** do `gbm_previsao`; a diferença entre os dois isola o efeito da não linearidade |
 
 O `dom_previsao` usa a mesma reta em todos os leads, ou seja, supõe que o viés do CAMS não
-depende do lead. O `gbm_previsao` treina um modelo por lead e pode aprender um viés
-diferente para cada um.
+depende do lead. O `gbm_previsao` e a `linear_previsao` ajustam um modelo por lead.
 
 ```bash
 ../Benchmark/.venv/bin/pm25bench run configs/benchmark_calibracao_previsao_sintetico.yaml
 ../Benchmark/.venv/bin/pm25bench run configs/benchmark_calibracao_previsao.yaml
 ```
 
-A segunda precisa das previsões em `../benchmark_cams_forecast/data`. Os resultados dessa
-trilha não se comparam com os do contrato padrão, porque as previsões começam em 2015 e o
-conjunto de amostras muda.
+A segunda precisa das previsões em `../benchmark_cams_forecast/data` e da reanálise em
+`../dados_benchmark/sisam` (com 2025). O notebook `notebooks/diferenca_pareada.ipynb`
+compara o `gbm_previsao` com os outros modelos deste experimento por bootstrap pareado.
 
 ## Estrutura
 
 ```
 src/pm25bench_calibracao/
 ├── features.py   # features_base, features_estendidas, features_previsao e nomes
+├── linear.py     # LinearPrevisao
 ├── dom.py        # DOM e DOMPrevisao
 └── gbm.py        # GBM e GBMPrevisao (com importancias() por ganho)
 tests/test_calibracao.py

@@ -1,4 +1,9 @@
 # Trilha de previsão do CAMS (não comparável com o leaderboard padrão).
+# Experimento de calibração da previsão: os modelos do plugin (dom_previsao, gbm_previsao,
+# linear_previsao) usam só a previsão do CAMS, as observações até t-1 e o calendário. A
+# reanálise continua na tabela (o benchmark exige) mas nenhum desses modelos a lê, porque ela
+# não existe no momento real da emissão. Os baselines climatology e persistence também não a
+# usam; forecast_raw é a previsão do CAMS sem correção.
 # Baseada em ../Benchmark/configs/benchmark_forecast_local.yaml. A reanálise e as
 # observações vêm do download verificado por hash (o README do benchmark garante que
 # `download` e `local` geram a mesma tabela); as previsões vêm da pasta local, que é a
@@ -23,7 +28,7 @@ models:
   - name: persistence
   - name: climatology
   - name: forecast_raw
-  - name: linear_regression
+  - name: linear_previsao  # mesmas entradas do gbm_previsao (sem reanálise)
   - name: dom_previsao
   - name: gbm_previsao
 

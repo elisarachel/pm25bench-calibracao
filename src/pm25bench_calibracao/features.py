@@ -46,14 +46,21 @@ NOMES_ESTENDIDAS: list[str] = [
 ]
 
 
-#: Nomes das variáveis de ``features_previsao``, na mesma ordem do vetor.
+#: Nomes das variáveis de ``features_previsao``, na mesma ordem do vetor. Nenhuma vem da
+#: reanálise, que não existe no momento real da emissão.
 NOMES_PREVISAO: list[str] = [
-    # começa com as variáveis base
-    *NOMES_BASE,
     # previsão do CAMS emitida em t para o dia alvo t + lead
     "fc_pm2_5_alvo",
     # erro recente da previsão: média de (obs - fc_pm2_5_l0) de t-n+1 a t-1
     "erro_recente_fc",
+    # observação do dia t-1 (persistência)
+    "obs_t-1",
+    # média da observação de t-n+1 a t-1
+    "obs_media_contexto",
+    # sazonalidade: seno do dia do ano
+    "sazonal_sin",
+    # sazonalidade: cosseno do dia do ano
+    "sazonal_cos",
 ]
 
 
@@ -153,15 +160,22 @@ def features_estendidas(context: pd.DataFrame) -> np.ndarray:
 
 
 def features_previsao(context: pd.DataFrame, lead: int) -> np.ndarray:
-    """Variáveis base mais a previsão do CAMS para o dia alvo e o erro recente da previsão.
+    """Variáveis da calibração da previsão: só informação disponível na manhã do dia t.
 
-    Acrescenta a ``features_base``:
+    A previsão do CAMS emitida às 00 UTC de t fica pronta na manhã de t; a reanálise, não
+    (ela é produzida com meses de atraso). Por isso esta função **não lê nenhuma coluna
+    ``rea_*``**: usa só a previsão, as observações até t-1 e o calendário. É o cenário
+    operacional de uma calibração de previsão (Model Output Statistics).
+
+    Variáveis, na ordem de ``NOMES_PREVISAO``:
 
     - ``fc_pm2_5_l{lead}`` da linha t: a previsão emitida em t para o dia alvo t + lead;
     - o erro recente da previsão, ``média(obs(d) - fc_pm2_5_l0(d))`` para d de t-n+1 a t-1.
       Cada dia d é comparado com a previsão de lead 0 emitida nele mesmo, e os dois valores
       são conhecidos antes de t. É o viés aditivo recente do CAMS, a mesma informação que
-      uma correção de janela móvel (ADD) usaria.
+      uma correção de janela móvel (ADD) usaria;
+    - ``obs`` de t-1 e a média de ``obs`` de t-n+1 a t-1;
+    - ``sin(2π·doy/365,25)`` e ``cos(2π·doy/365,25)``, com ``doy`` = dia do ano de t.
 
     Parameters
     ----------
@@ -184,8 +198,6 @@ def features_previsao(context: pd.DataFrame, lead: int) -> np.ndarray:
     alvo = f"fc_pm2_5_l{lead}"
     # confere as colunas antes de usar
     exigir_previsao(context, sorted({"fc_pm2_5_l0", alvo}), "features_previsao")
-    # parte comum com a regressão do benchmark
-    base = features_base(context)
     # previsão emitida em t (última linha) para t + lead
     fc_alvo = float(context[alvo].iloc[-1])
     # observações de t-n+1 a t-1 (a linha de t fica de fora)
@@ -194,5 +206,9 @@ def features_previsao(context: pd.DataFrame, lead: int) -> np.ndarray:
     fc0 = context["fc_pm2_5_l0"].iloc[:-1].to_numpy(dtype="float64")
     # erro médio recente da previsão (positivo = CAMS subestima)
     erro = float(np.mean(obs - fc0))
+    # dia do ano (1 a 366) da data de emissão t
+    doy = context.index[-1].day_of_year
+    # posição no ciclo anual; seno e cosseno juntos evitam o salto 31/12 -> 01/01
+    sazonal = [np.sin(2 * np.pi * doy / 365.25), np.cos(2 * np.pi * doy / 365.25)]
     # junta na ordem de NOMES_PREVISAO
-    return np.concatenate([base, [fc_alvo, erro]])
+    return np.array([fc_alvo, erro, obs[-1], obs.mean(), *sazonal], dtype="float64")

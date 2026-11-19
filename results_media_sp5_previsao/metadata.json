@@ -1,8 +1,8 @@
 {
   "pm25bench_version": "0.1.0",
-  "dataset_hash": "sha256:f9248c59bd8f5151a60aec4074b90cd6fa86ceb0b1312a63b3e37583fae0cb02",
+  "dataset_hash": "sha256:245663c20e48aaef849ab5dbe331b11aba0500516013f4188428be74b51ab9ee",
   "station": "média de 5 estações (98, 270, 73, 95, 83), mínimo de 4 por hora",
-  "n_test_samples": 519,
+  "n_test_samples": 756,
   "test_period": [
     "2023-01-08",
     "2025-12-31"

@@ -91,6 +91,14 @@ class GBM:
         Número máximo de árvores.
     early_stopping : int
         Rodadas sem melhora na validação até parar.
+    bagging_fraction : float
+        Fração das amostras sorteada para cada árvore (1,0 = todas, sem sorteio).
+    feature_fraction : float
+        Fração das variáveis sorteada para cada árvore (1,0 = todas, sem sorteio).
+
+    Com ``bagging_fraction`` e ``feature_fraction`` iguais a 1,0 (padrão), o treino não
+    sorteia nada e o resultado não depende de ``seed``. Valores menores introduzem
+    aleatoriedade (e regularização); só então várias sementes dão modelos diferentes.
     """
 
     # declarado na classe para cumprir o protocolo Forecaster; o valor é definido no __init__
@@ -107,6 +115,8 @@ class GBM:
         min_data_in_leaf: int = 20,
         max_rounds: int = 2000,
         early_stopping: int = 100,
+        bagging_fraction: float = 1.0,
+        feature_fraction: float = 1.0,
     ) -> None:
         # só duas variantes são aceitas; qualquer outra é erro de configuração
         if variaveis not in _VARIANTES:
@@ -149,6 +159,12 @@ class GBM:
             "force_row_wise": True,
             # silencia as mensagens do LightGBM
             "verbose": -1,
+            # fração das amostras por árvore (1,0 = todas)
+            "bagging_fraction": bagging_fraction,
+            # sorteia as amostras a cada árvore quando a fração é menor que 1
+            "bagging_freq": 1 if bagging_fraction < 1 else 0,
+            # fração das variáveis por árvore (1,0 = todas)
+            "feature_fraction": feature_fraction,
         }
         # um Booster (modelo treinado) por lead
         self._modelos: dict[int, lgb.Booster] = {}

@@ -161,6 +161,16 @@ CAMS bruto, com IC) e `metricas_categoricas.csv` (POD, FAR, CSI, ETS, viés de f
 acurácia nos limiares 15, 25 e 50 µg/m³) em `results_media_sp5_previsao/`. O notebook
 `notebooks/diferenca_pareada.ipynb` explica e calcula o bootstrap pareado passo a passo.
 
+Sensibilidade à semente e custo computacional (grava `sementes.csv` e `tempos.csv`):
+
+```bash
+../Benchmark/.venv/bin/python scripts/sementes_tempos.py configs/benchmark_media_sp5_previsao.yaml
+```
+
+O `gbm_previsao` padrão não sorteia nada no treino e não depende da semente. O script
+confirma isso e treina uma variante com subamostragem (80% das amostras e das variáveis por
+árvore, opções `bagging_fraction` e `feature_fraction` do `GBM`) com 10 sementes.
+
 Dados necessários: previsões em `../benchmark_cams_forecast/data`, reanálise em
 `../dados_benchmark/sisam` (com 2025) e observações em `../benchmark_pm2_5/data`.
 

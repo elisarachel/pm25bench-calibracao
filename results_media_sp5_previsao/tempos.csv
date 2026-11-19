@@ -1,0 +1,7 @@
+modelo,treino_s,previsao_ms_por_rodada
+persistence,0.0,0.02409
+climatology,0.00044,0.1159
+forecast_raw,0.0,0.25654
+dom_previsao,0.00081,1.12269
+linear_previsao,2.1834,0.60748
+gbm_previsao,2.93785,1.15763

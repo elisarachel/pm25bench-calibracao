@@ -158,7 +158,8 @@ O primeiro grava `results_media_sp5_previsao/`; o segundo, as figuras do relató
 `figuras/` (cada uma responde a uma pergunta, listadas no início do script) e as tabelas
 `diferenca_pareada.csv` (bootstrap pareado), `skill.csv` (MSESS contra a climatologia e o
 CAMS bruto, com IC) e `metricas_categoricas.csv` (POD, FAR, CSI, ETS, viés de frequência e
-acurácia nos limiares 15, 25 e 50 µg/m³) em `results_media_sp5_previsao/`. O notebook
+acurácia nos limiares 15, 25 e 50 µg/m³) em `results_media_sp5_previsao/`. **Todos os resultados juntos**, com as figuras, as tabelas e a interpretação de cada uma,
+estão em `notebooks/resultados.ipynb`. O notebook
 `notebooks/diferenca_pareada.ipynb` explica e calcula o bootstrap pareado passo a passo.
 
 Sensibilidade à semente e custo computacional (grava `sementes.csv` e `tempos.csv`):
